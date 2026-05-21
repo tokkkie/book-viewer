@@ -54,6 +54,27 @@ body {
   letter-spacing: 0.5px;
 }
 
+.btn-back {
+  padding: 4px 8px;
+  background: #3a3a3a;
+  color: #e0e0e0;
+  border: 1px solid #4a4a4a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-back:hover {
+  background: #4a4a4a;
+}
+
+.btn-back:disabled {
+  background: #2a2a2a;
+  color: #666;
+  cursor: not-allowed;
+}
+
 .panel-content {
   flex: 1;
   overflow-y: auto;

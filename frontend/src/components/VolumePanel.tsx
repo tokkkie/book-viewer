@@ -54,7 +54,6 @@ export default function VolumePanel({ series, selectedVolume, onSelectVolume }: 
   useEffect(() => {
     // Only reset if viewer was open and is now closed
     if (prevSelectedVolumeRef.current && !selectedVolume && pathStack.length > 0) {
-      console.log('Viewer closed, resetting navigation')
       setPathStack([])
       setCurrentPath('')
       // Reload series volumes
@@ -91,62 +90,79 @@ export default function VolumePanel({ series, selectedVolume, onSelectVolume }: 
   }
 
   const handleDoubleClick = async (volume: VolumeInfo) => {
-    console.log('Double click on volume:', volume)
-    console.log('  isZip:', volume.isZip, 'images:', volume.images, 'hasSubdirectories:', volume.hasSubdirectories)
-    console.log('  path:', volume.path)
-    
-    // If it's a zip file with subdirectories, explore it
-    if (volume.isZip && volume.hasSubdirectories && window.go?.app?.App?.GetZipContents) {
-      console.log('  -> Zip has subdirectories, checking contents...')
+    // If it's an archive file with subdirectories, explore it
+    if (volume.isZip && volume.hasSubdirectories && window.go?.app?.App?.GetArchiveContents) {
       try {
-        const contents = await window.go.app.App.GetZipContents(volume.path)
-        console.log('  -> Got contents:', contents)
+        const contents = await window.go.app.App.GetArchiveContents(volume.path)
         if (contents && contents.length > 0) {
-          // Has nested content, navigate into it
-          console.log('  -> Navigating into zip')
-          setPathStack(prev => [...prev, currentPath || series])
+          setPathStack(prev => [...prev, currentPath || ''])
           setCurrentPath(volume.path)
           setVolumeList(contents)
           setSelectedIndex(-1)
           return
         }
       } catch (error) {
-        console.error('Failed to load zip contents:', error)
+        console.error('Failed to load archive contents:', error)
       }
     }
     
-    // Otherwise, open as viewer (including directories inside zips)
-    console.log('  -> Opening viewer')
+    // If it's a directory with subdirectories, explore it
+    if (volume.isDir && volume.hasSubdirectories && window.go?.app?.App?.GetDirContents) {
+      try {
+        const contents = await window.go.app.App.GetDirContents(volume.path)
+        if (contents && contents.length > 0) {
+          setPathStack(prev => [...prev, currentPath || ''])
+          setCurrentPath(volume.path)
+          setVolumeList(contents)
+          setSelectedIndex(-1)
+          return
+        }
+      } catch (error) {
+        console.error('Failed to load directory contents:', error)
+      }
+    }
+    
+    // Otherwise, open as viewer
     onSelectVolume(volume)
   }
 
   const handleGoBack = async () => {
-    if (pathStack.length === 0) return
+    if (pathStack.length === 0) {
+      return
+    }
 
     const previousPath = pathStack[pathStack.length - 1]
     setPathStack(prev => prev.slice(0, -1))
     setCurrentPath(previousPath)
 
-    console.log('Going back to:', previousPath || series)
-
     // Reload the previous level
-    if (previousPath && previousPath.includes('::')) {
-      // Going back inside a zip
-      if (window.go?.app?.App?.GetZipContents) {
+    if (!previousPath) {
+      // Going back to series level
+      if (window.go?.app?.App?.GetVolumeList) {
         try {
-          const list = await window.go.app.App.GetZipContents(previousPath)
+          const list = await window.go.app.App.GetVolumeList(series)
           setVolumeList(list || [])
         } catch (error) {
-          console.error('Failed to load zip contents:', error)
+          console.error('Failed to load volumes:', error)
         }
       }
-    } else if (window.go?.app?.App?.GetVolumeList) {
-      // Going back to series level
+    } else if (previousPath.includes('::')) {
+      // Going back inside an archive
+      if (window.go?.app?.App?.GetArchiveContents) {
+        try {
+          const list = await window.go.app.App.GetArchiveContents(previousPath)
+          setVolumeList(list || [])
+        } catch (error) {
+          console.error('Failed to load archive contents:', error)
+        }
+      }
+    } else if (window.go?.app?.App?.GetDirContents) {
+      // Going back to a directory that was explored
       try {
-        const list = await window.go.app.App.GetVolumeList(previousPath || series)
+        const list = await window.go.app.App.GetDirContents(previousPath)
         setVolumeList(list || [])
       } catch (error) {
-        console.error('Failed to load volumes:', error)
+        console.error('Failed to load directory contents:', error)
       }
     }
   }
@@ -155,9 +171,14 @@ export default function VolumePanel({ series, selectedVolume, onSelectVolume }: 
     <div className="panel volume-panel" onKeyDown={handleKeyDown} tabIndex={0}>
       <div className="panel-header">
         <h2>Volumes</h2>
-        {pathStack.length > 0 && (
-          <button onClick={handleGoBack} className="btn-back">← Back</button>
-        )}
+        <button 
+          onClick={handleGoBack} 
+          className="btn-back" 
+          title="Go up"
+          disabled={pathStack.length === 0 && !currentPath}
+        >
+          ↑
+        </button>
       </div>
       <div className="panel-content">
         {volumeList && volumeList.map((volume, index) => (

@@ -3,10 +3,14 @@ package app
 import (
 	"archive/zip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/bodgit/sevenzip"
+	"github.com/nwaples/rardecode/v2"
 )
 
 type VolumeInfo struct {
@@ -23,10 +27,7 @@ func (a *App) GetSeriesList() ([]string, error) {
 	rootPath := a.rootPath
 	a.mu.Unlock()
 
-	fmt.Printf("GetSeriesList called, rootPath: %s\n", rootPath)
-
 	if rootPath == "" {
-		fmt.Println("GetSeriesList: rootPath is empty")
 		return []string{}, nil
 	}
 
@@ -43,7 +44,6 @@ func (a *App) GetSeriesList() ([]string, error) {
 	}
 
 	sort.Strings(series)
-	fmt.Printf("GetSeriesList: found %d series\n", len(series))
 	return series, nil
 }
 
@@ -63,36 +63,50 @@ func (a *App) GetVolumeList(series string) ([]VolumeInfo, error) {
 	}
 
 	var volumes []VolumeInfo
+	var directImages []string
+
 	for _, entry := range entries {
 		name := entry.Name()
 		path := filepath.Join(seriesPath, name)
 
 		if entry.IsDir() {
-			imageCount, err := countImagesInDir(path)
+			imageCount, hasSubdirs, err := checkDirContents(path)
 			if err == nil && imageCount > 0 {
 				volumes = append(volumes, VolumeInfo{
-					Name:   name,
-					Path:   path,
-					IsZip:  false,
-					IsDir:  true,
-					Images: imageCount,
+					Name:              name,
+					Path:              path,
+					IsZip:             false,
+					IsDir:             true,
+					Images:            imageCount,
+					HasSubdirectories: hasSubdirs,
 				})
 			}
-		} else {
-			if isArchiveFile(name) {
-				imageCount, hasSubdirs, err := countImagesInArchiveWithSubdirs(path)
-				if err == nil && imageCount > 0 {
-					volumes = append(volumes, VolumeInfo{
-						Name:              name,
-						Path:              path,
-						IsZip:             true, // Keep as true for compatibility
-						IsDir:             false,
-						Images:            imageCount,
-						HasSubdirectories: hasSubdirs,
-					})
-				}
+		} else if isArchiveFile(name) {
+			imageCount, hasSubdirs, err := countImagesInArchiveWithSubdirs(path)
+			if err == nil && imageCount > 0 {
+				volumes = append(volumes, VolumeInfo{
+					Name:              name,
+					Path:              path,
+					IsZip:             true, // Keep as true for compatibility
+					IsDir:             false,
+					Images:            imageCount,
+					HasSubdirectories: hasSubdirs,
+				})
 			}
+		} else if isImageFile(name) {
+			directImages = append(directImages, name)
 		}
+	}
+
+	// If there are images directly in the series directory, add them as a single volume
+	if len(directImages) > 0 {
+		volumes = append(volumes, VolumeInfo{
+			Name:   series + " (images)",
+			Path:   seriesPath,
+			IsZip:  false,
+			IsDir:  true,
+			Images: len(directImages),
+		})
 	}
 
 	sort.Slice(volumes, func(i, j int) bool {
@@ -100,6 +114,57 @@ func (a *App) GetVolumeList(series string) ([]VolumeInfo, error) {
 	})
 
 	return volumes, nil
+}
+
+func checkDirContents(dirPath string) (imageCount int, hasSubdirs bool, err error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return 0, false, err
+	}
+
+	hasSubdirs = false
+	hasImages := false
+	hasArchives := false
+
+	// Check immediate children
+	for _, entry := range entries {
+		if entry.IsDir() {
+			hasSubdirs = true
+		} else if isImageFile(entry.Name()) {
+			hasImages = true
+		} else if isArchiveFile(entry.Name()) {
+			hasArchives = true
+		}
+	}
+
+	// If has subdirectories, count all images and archives recursively
+	if hasSubdirs {
+		count := 0
+		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() && (isImageFile(path) || isArchiveFile(path)) {
+				count++
+			}
+			return nil
+		})
+		return count, true, err
+	}
+
+	// If only images/archives, count them
+	// Set hasSubdirs=true if archives exist so GetDirContents can be used to view them
+	if hasImages || hasArchives {
+		count := 0
+		for _, entry := range entries {
+			if !entry.IsDir() && (isImageFile(entry.Name()) || isArchiveFile(entry.Name())) {
+				count++
+			}
+		}
+		return count, hasArchives, nil
+	}
+
+	return 0, false, nil
 }
 
 func countImagesInDir(dirPath string) (int, error) {
@@ -172,15 +237,75 @@ func countImagesInZipWithSubdirs(zipPath string) (int, bool, error) {
 func countImagesInArchiveWithSubdirs(archivePath string) (int, bool, error) {
 	ext := strings.ToLower(filepath.Ext(archivePath))
 
-	// For now, only ZIP is fully supported
-	// RAR and 7z will be treated as simple archives without subdirectory detection
-	if ext == ".zip" || ext == ".cbz" {
+	switch ext {
+	case ".zip", ".cbz":
 		return countImagesInZipWithSubdirs(archivePath)
+	case ".rar", ".cbr":
+		return countImagesInRarWithSubdirs(archivePath)
+	case ".7z", ".cb7":
+		return countImagesIn7zWithSubdirs(archivePath)
+	default:
+		return 0, false, nil
+	}
+}
+
+func countImagesInRarWithSubdirs(rarPath string) (int, bool, error) {
+	f, err := os.Open(rarPath)
+	if err != nil {
+		return 0, false, err
+	}
+	defer f.Close()
+
+	r, err := rardecode.NewReader(f)
+	if err != nil {
+		return 0, false, err
 	}
 
-	// For RAR and 7z, just count images (no subdirectory support yet)
-	// Return hasSubdirs=false to open directly in viewer
-	return countImagesInArchive(archivePath), false, nil
+	count := 0
+	hasSubdirs := false
+
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, false, err
+		}
+
+		name := header.Name
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			hasSubdirs = true
+		}
+		if !header.IsDir && isImageFile(name) {
+			count++
+		}
+	}
+
+	return count, hasSubdirs, nil
+}
+
+func countImagesIn7zWithSubdirs(sevenZipPath string) (int, bool, error) {
+	r, err := sevenzip.OpenReader(sevenZipPath)
+	if err != nil {
+		return 0, false, err
+	}
+	defer r.Close()
+
+	count := 0
+	hasSubdirs := false
+
+	for _, f := range r.File {
+		name := f.Name
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			hasSubdirs = true
+		}
+		if !f.FileInfo().IsDir() && isImageFile(name) {
+			count++
+		}
+	}
+
+	return count, hasSubdirs, nil
 }
 
 func countImagesInArchive(archivePath string) int {
@@ -215,99 +340,240 @@ func isArchiveFile(filename string) bool {
 	return ext == ".zip" || ext == ".cbz" || ext == ".rar" || ext == ".cbr" || ext == ".7z" || ext == ".cb7"
 }
 
+// GetDirContents returns the contents of a directory (subdirectories and archives)
+func (a *App) GetDirContents(dirPath string) ([]VolumeInfo, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var volumes []VolumeInfo
+	var directImages []string
+
+	for _, entry := range entries {
+		name := entry.Name()
+		path := filepath.Join(dirPath, name)
+
+		if entry.IsDir() {
+			imageCount, hasSubdirs, err := checkDirContents(path)
+			if err == nil && imageCount > 0 {
+				volumes = append(volumes, VolumeInfo{
+					Name:              name,
+					Path:              path,
+					IsZip:             false,
+					IsDir:             true,
+					Images:            imageCount,
+					HasSubdirectories: hasSubdirs,
+				})
+			}
+		} else if isArchiveFile(name) {
+			imageCount, hasSubdirs, err := countImagesInArchiveWithSubdirs(path)
+			if err == nil && imageCount > 0 {
+				volumes = append(volumes, VolumeInfo{
+					Name:              name,
+					Path:              path,
+					IsZip:             true,
+					IsDir:             false,
+					Images:            imageCount,
+					HasSubdirectories: hasSubdirs,
+				})
+			}
+		} else if isImageFile(name) {
+			directImages = append(directImages, name)
+		}
+	}
+
+	// If there are images directly in the directory, add them as a single volume
+	if len(directImages) > 0 {
+		baseName := filepath.Base(dirPath)
+		volumes = append(volumes, VolumeInfo{
+			Name:   baseName + " (images)",
+			Path:   dirPath,
+			IsZip:  false,
+			IsDir:  true,
+			Images: len(directImages),
+		})
+	}
+
+	sort.Slice(volumes, func(i, j int) bool {
+		return volumes[i].Name < volumes[j].Name
+	})
+
+	return volumes, nil
+}
+
 // GetZipContents returns the contents of a zip file (nested zips, directories, or images)
 func (a *App) GetZipContents(zipPath string) ([]VolumeInfo, error) {
-	fmt.Printf("GetZipContents called for: %s\n", zipPath)
-
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open zip: %w", err)
 	}
 	defer r.Close()
 
-	// First pass: collect directories and files
-	dirMap := make(map[string]int) // directory -> image count
+	var entries []string
 	var nestedZips []VolumeInfo
-	rootImages := 0
 
-	fmt.Printf("Scanning zip contents...\n")
 	for _, f := range r.File {
-		name := f.Name
-		fmt.Printf("  File: %s (IsDir: %v)\n", name, f.FileInfo().IsDir())
-
-		// Check if it's in a subdirectory
-		dir := filepath.Dir(name)
-		if dir != "." && dir != "/" {
-			// Extract top-level directory
-			parts := strings.Split(strings.TrimPrefix(name, "/"), "/")
-			if len(parts) > 1 {
-				topDir := parts[0]
-				if !f.FileInfo().IsDir() && isImageFile(name) {
-					dirMap[topDir]++
-					fmt.Printf("    -> Added to directory '%s' (count: %d)\n", topDir, dirMap[topDir])
-				}
-				continue
-			}
+		if f.FileInfo().IsDir() {
+			continue
 		}
+		name := f.Name
+		entries = append(entries, name)
 
-		// Root level files
-		if !f.FileInfo().IsDir() {
-			if isZipFile(name) {
-				// Nested zip file
-				fmt.Printf("    -> Nested zip detected\n")
-				nestedZips = append(nestedZips, VolumeInfo{
-					Name:   filepath.Base(name),
-					Path:   zipPath + "::" + name,
-					IsZip:  true,
-					IsDir:  false,
-					Images: 0,
-				})
-			} else if isImageFile(name) {
-				rootImages++
-				fmt.Printf("    -> Root level image (count: %d)\n", rootImages)
-			}
+		// Detect nested zip files at root level
+		if !strings.Contains(name, "/") && isZipFile(name) {
+			nestedZips = append(nestedZips, VolumeInfo{
+				Name:   filepath.Base(name),
+				Path:   zipPath + "::" + name,
+				IsZip:  true,
+				IsDir:  false,
+				Images: 0,
+			})
 		}
 	}
 
-	var volumes []VolumeInfo
+	// Use common processing logic
+	volumes, err := processArchiveFileEntries(zipPath, entries)
+	if err != nil {
+		return nil, err
+	}
 
-	fmt.Printf("Analysis results:\n")
-	fmt.Printf("  Directories found: %d\n", len(dirMap))
-	fmt.Printf("  Nested zips found: %d\n", len(nestedZips))
-	fmt.Printf("  Root images: %d\n", rootImages)
+	// Append nested zips
+	if len(nestedZips) > 0 {
+		volumes = append(volumes, nestedZips...)
+		sort.Slice(volumes, func(i, j int) bool {
+			return volumes[i].Name < volumes[j].Name
+		})
+	}
 
-	// If there are directories with images, treat each as a volume
-	if len(dirMap) > 0 {
-		fmt.Printf("Creating volumes from directories:\n")
-		for dirName, imageCount := range dirMap {
-			if imageCount > 0 {
-				fmt.Printf("  - %s (%d images)\n", dirName, imageCount)
+	return volumes, nil
+}
+
+// GetArchiveContents returns the contents of any archive file (zip, rar, 7z)
+func (a *App) GetArchiveContents(archivePath string) ([]VolumeInfo, error) {
+	ext := strings.ToLower(filepath.Ext(archivePath))
+
+	switch ext {
+	case ".zip", ".cbz":
+		return a.GetZipContents(archivePath)
+	case ".rar", ".cbr":
+		return getRarContents(archivePath)
+	case ".7z", ".cb7":
+		return get7zContents(archivePath)
+	default:
+		return nil, fmt.Errorf("unsupported archive format: %s", ext)
+	}
+}
+
+func getRarContents(rarPath string) ([]VolumeInfo, error) {
+	f, err := os.Open(rarPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r, err := rardecode.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []string
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !header.IsDir {
+			entries = append(entries, header.Name)
+		}
+	}
+
+	return processArchiveFileEntries(rarPath, entries)
+}
+
+// processArchiveFileEntries analyzes archive entries and creates VolumeInfo list
+// If there's only 1 top-level directory containing subdirectories, returns 2nd-level dirs as volumes
+func processArchiveFileEntries(archivePath string, entries []string) ([]VolumeInfo, error) {
+	// Analyze directory structure
+	topDirs := make(map[string]bool)
+	for _, entry := range entries {
+		parts := strings.Split(entry, "/")
+		if len(parts) > 1 {
+			topDirs[parts[0]] = true
+		}
+	}
+
+	// If there's only 1 top-level directory with subdirectories inside, expand it
+	if len(topDirs) == 1 {
+		var topDir string
+		for d := range topDirs {
+			topDir = d
+		}
+
+		// Count images in 2nd-level directories
+		subDirs := make(map[string]int)
+		for _, entry := range entries {
+			parts := strings.Split(entry, "/")
+			if len(parts) >= 3 && isImageFile(entry) {
+				subDir := parts[1]
+				subDirs[subDir]++
+			}
+		}
+
+		// If there are multiple 2nd-level directories, return them as separate volumes
+		if len(subDirs) > 1 {
+			var volumes []VolumeInfo
+			for dirName, imageCount := range subDirs {
 				volumes = append(volumes, VolumeInfo{
 					Name:   dirName,
-					Path:   zipPath + "::" + dirName,
-					IsZip:  false,
+					Path:   archivePath + "::" + topDir + "/" + dirName,
+					IsZip:  true,
 					IsDir:  true,
 					Images: imageCount,
 				})
 			}
+			sort.Slice(volumes, func(i, j int) bool {
+				return volumes[i].Name < volumes[j].Name
+			})
+			return volumes, nil
 		}
 	}
 
-	// Add nested zips
-	if len(nestedZips) > 0 {
-		fmt.Printf("Adding nested zips:\n")
-		for _, nz := range nestedZips {
-			fmt.Printf("  - %s\n", nz.Name)
+	// Standard processing: top-level directories as volumes
+	dirMap := make(map[string]int)
+	rootImages := 0
+	for _, entry := range entries {
+		if strings.Contains(entry, "/") {
+			parts := strings.Split(entry, "/")
+			topDir := parts[0]
+			if isImageFile(entry) {
+				dirMap[topDir]++
+			}
+		} else if isImageFile(entry) {
+			rootImages++
 		}
 	}
-	volumes = append(volumes, nestedZips...)
 
-	// If no directories or nested zips, treat the whole zip as a volume
+	var volumes []VolumeInfo
+	for dirName, imageCount := range dirMap {
+		if imageCount > 0 {
+			volumes = append(volumes, VolumeInfo{
+				Name:   dirName,
+				Path:   archivePath + "::" + dirName,
+				IsZip:  true,
+				IsDir:  true,
+				Images: imageCount,
+			})
+		}
+	}
+
 	if len(volumes) == 0 && rootImages > 0 {
-		fmt.Printf("Treating entire zip as single volume (%d images)\n", rootImages)
 		volumes = append(volumes, VolumeInfo{
-			Name:   filepath.Base(zipPath),
-			Path:   zipPath,
+			Name:   filepath.Base(archivePath),
+			Path:   archivePath,
 			IsZip:  true,
 			IsDir:  false,
 			Images: rootImages,
@@ -318,6 +584,22 @@ func (a *App) GetZipContents(zipPath string) ([]VolumeInfo, error) {
 		return volumes[i].Name < volumes[j].Name
 	})
 
-	fmt.Printf("Returning %d volumes\n", len(volumes))
 	return volumes, nil
+}
+
+func get7zContents(sevenZipPath string) ([]VolumeInfo, error) {
+	r, err := sevenzip.OpenReader(sevenZipPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var entries []string
+	for _, f := range r.File {
+		if !f.FileInfo().IsDir() {
+			entries = append(entries, f.Name)
+		}
+	}
+
+	return processArchiveFileEntries(sevenZipPath, entries)
 }

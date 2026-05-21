@@ -57,7 +57,8 @@ func (a *App) GetImageData(volumePath string, isZip bool, index int) (*ImageInfo
 		if len(parts) == 2 {
 			archivePath := parts[0]
 			subdir := parts[1]
-			fullImagePath := filepath.Join(subdir, imagePath)
+			// Use / for archive internal paths (RAR/7z use /)
+			fullImagePath := subdir + "/" + imagePath
 			data, name, err = readImageFromArchive(archivePath, fullImagePath)
 			if err != nil {
 				return nil, err
@@ -225,9 +226,12 @@ func getImageListFromArchiveSubdir(archivePath, subdir string) ([]string, error)
 	switch ext {
 	case ".zip", ".cbz":
 		return getImageListFromZipSubdir(archivePath, subdir)
+	case ".rar", ".cbr":
+		return getImageListFromRarSubdir(archivePath, subdir)
+	case ".7z", ".cb7":
+		return getImageListFrom7zSubdir(archivePath, subdir)
 	default:
-		// For RAR and 7z, subdirectory support not yet implemented
-		return getImageListFromArchive(archivePath)
+		return nil, fmt.Errorf("unsupported archive format: %s", ext)
 	}
 }
 
@@ -247,6 +251,67 @@ func getImageListFromZipSubdir(zipPath, subdir string) ([]string, error) {
 	for _, f := range r.File {
 		if !f.FileInfo().IsDir() && strings.HasPrefix(f.Name, prefix) && isImageFile(f.Name) {
 			// Store relative path within the subdirectory
+			relPath := strings.TrimPrefix(f.Name, prefix)
+			images = append(images, relPath)
+		}
+	}
+
+	sort.Strings(images)
+	return images, nil
+}
+
+func getImageListFromRarSubdir(rarPath, subdir string) ([]string, error) {
+	f, err := os.Open(rarPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r, err := rardecode.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := strings.TrimPrefix(subdir, "/")
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	var images []string
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if !header.IsDir && strings.HasPrefix(header.Name, prefix) && isImageFile(header.Name) {
+			relPath := strings.TrimPrefix(header.Name, prefix)
+			images = append(images, relPath)
+		}
+	}
+
+	sort.Strings(images)
+	return images, nil
+}
+
+func getImageListFrom7zSubdir(sevenZipPath, subdir string) ([]string, error) {
+	r, err := sevenzip.OpenReader(sevenZipPath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	prefix := strings.TrimPrefix(subdir, "/")
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	var images []string
+	for _, f := range r.File {
+		if !f.FileInfo().IsDir() && strings.HasPrefix(f.Name, prefix) && isImageFile(f.Name) {
 			relPath := strings.TrimPrefix(f.Name, prefix)
 			images = append(images, relPath)
 		}
