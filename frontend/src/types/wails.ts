@@ -8,6 +8,8 @@ declare global {
           GetSeriesList: () => Promise<string[]>
           GetVolumeList: (series: string) => Promise<VolumeInfo[]>
           GetZipContents: (zipPath: string) => Promise<VolumeInfo[]>
+          GetDirContents: (dirPath: string) => Promise<VolumeInfo[]>
+          GetArchiveContents: (archivePath: string) => Promise<VolumeInfo[]>
           GetImageList: (volumePath: string, isZip: boolean) => Promise<string[]>
           GetImageData: (volumePath: string, isZip: boolean, index: number) => Promise<ImageInfo>
           GetImageRange: (volumePath: string, isZip: boolean, startIndex: number, count: number) => Promise<ImageInfo[]>
