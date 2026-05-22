@@ -2,8 +2,13 @@ package app
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +24,8 @@ type ImageInfo struct {
 	Name     string `json:"name"`
 	DataURL  string `json:"dataUrl"`
 	MimeType string `json:"mimeType"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
 }
 
 func (a *App) GetImageList(volumePath string, isZip bool) ([]string, error) {
@@ -81,12 +88,20 @@ func (a *App) GetImageData(volumePath string, isZip bool, index int) (*ImageInfo
 	mimeType := getMimeType(name)
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 
-	return &ImageInfo{
+	info := &ImageInfo{
 		Index:    index,
 		Name:     name,
 		DataURL:  dataURL,
 		MimeType: mimeType,
-	}, nil
+	}
+
+	if img, _, err := image.Decode(bytes.NewReader(data)); err == nil {
+		bounds := img.Bounds()
+		info.Width = bounds.Dx()
+		info.Height = bounds.Dy()
+	}
+
+	return info, nil
 }
 
 func (a *App) GetImageRange(volumePath string, isZip bool, startIndex, count int) ([]*ImageInfo, error) {

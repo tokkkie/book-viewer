@@ -42,4 +42,6 @@ export interface ImageInfo {
   name: string
   dataUrl: string
   mimeType: string
+  width: number
+  height: number
 }

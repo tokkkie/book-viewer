@@ -5,6 +5,8 @@ export namespace app {
 	    name: string;
 	    dataUrl: string;
 	    mimeType: string;
+	    width: number;
+	    height: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ImageInfo(source);
@@ -16,6 +18,8 @@ export namespace app {
 	        this.name = source["name"];
 	        this.dataUrl = source["dataUrl"];
 	        this.mimeType = source["mimeType"];
+	        this.width = source["width"];
+	        this.height = source["height"];
 	    }
 	}
 	export class VolumeInfo {
