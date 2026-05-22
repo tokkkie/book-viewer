@@ -1,5 +1,7 @@
 # Book Viewer
 
+![Book Viewer](./docs/book-viewer.png)
+
 Go + Wails + React + TypeScript で実装した書籍ビューワです
 
 世の中の画像ビューワやブックビューワを見ると欲しいものがなかったり、不要な機能がついている事も多く、設定も面倒でした。

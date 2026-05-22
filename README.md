@@ -1,5 +1,7 @@
 # Book Viewer
 
+![Book Viewer](./docs/book-viewer.png)
+
 A book/manga viewer implemented with Go + Wails + React + TypeScript
 
 Looking at existing image viewers and book viewers, I found that they either lack features I need or have too many unnecessary features with complicated settings.
