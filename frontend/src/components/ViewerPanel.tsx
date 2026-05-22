@@ -33,6 +33,8 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
             name,
             dataUrl: '',
             mimeType: '',
+            width: 0,
+            height: 0,
           }))
           setImages(imageInfos)
           setCurrentIndex(0)
@@ -151,9 +153,10 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     )
   }
 
-  const isCover = currentIndex === 0
   const currentImage = images[currentIndex]
-  const nextImage = !isCover && currentIndex + 1 < images.length ? images[currentIndex + 1] : null
+  const hasSize = currentImage && currentImage.width > 0 && currentImage.height > 0
+  const isLandscape = hasSize && currentImage.width > currentImage.height
+  const nextImage = !isLandscape && currentIndex + 1 < images.length ? images[currentIndex + 1] : null
 
   return (
     <div
@@ -172,8 +175,8 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
         <button onClick={onClose} className="btn-close">Close (Esc)</button>
       </div>
       <div className="viewer-content">
-        {isCover ? (
-          <div 
+        {isLandscape ? (
+          <div
             className="image-container single"
             style={{
               transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
@@ -190,7 +193,7 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
             </div>
           </div>
         ) : (
-          <div 
+          <div
             className="image-container double"
             style={{
               transform: `scale(${scale}) translate(${translate.x / scale}px, ${translate.y / scale}px)`,
