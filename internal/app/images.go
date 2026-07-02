@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bodgit/sevenzip"
@@ -149,7 +150,7 @@ func getImageListFromDir(dirPath string) ([]string, error) {
 		return nil, err
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -182,7 +183,7 @@ func getImageListFromZip(zipPath string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -213,7 +214,7 @@ func getImageListFromRar(rarPath string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -231,7 +232,7 @@ func getImageListFrom7z(sevenZipPath string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -271,7 +272,7 @@ func getImageListFromZipSubdir(zipPath, subdir string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -308,7 +309,7 @@ func getImageListFromRarSubdir(rarPath, subdir string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -332,7 +333,7 @@ func getImageListFrom7zSubdir(sevenZipPath, subdir string) ([]string, error) {
 		}
 	}
 
-	sort.Strings(images)
+	sortImagesNatural(images)
 	return images, nil
 }
 
@@ -436,6 +437,43 @@ func readImageFrom7z(sevenZipPath, imagePath string) ([]byte, string, error) {
 	}
 
 	return nil, "", fmt.Errorf("image not found in 7z: %s", imagePath)
+}
+
+func naturalLess(a, b string) bool {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		ca, cb := a[i], b[j]
+		if isDigit(ca) && isDigit(cb) {
+			for i < len(a) && isDigit(a[i]) {
+				i++
+			}
+			for j < len(b) && isDigit(b[j]) {
+				j++
+			}
+			na, _ := strconv.Atoi(a[:i])
+			nb, _ := strconv.Atoi(b[:j])
+			if na != nb {
+				return na < nb
+			}
+		} else {
+			if ca != cb {
+				return ca < cb
+			}
+			i++
+			j++
+		}
+	}
+	return len(a) < len(b)
+}
+
+func isDigit(c byte) bool {
+	return c >= '0' && c <= '9'
+}
+
+func sortImagesNatural(images []string) {
+	sort.Slice(images, func(i, j int) bool {
+		return naturalLess(images[i], images[j])
+	})
 }
 
 func getMimeType(filename string) string {
