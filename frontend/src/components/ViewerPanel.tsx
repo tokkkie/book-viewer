@@ -128,7 +128,7 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
-    setScale(prev => Math.max(0.5, Math.min(5, prev - e.deltaY * 0.001)))
+    setScale(prev => Math.max(0.5, Math.min(5, prev - e.deltaY * 0.00033)))
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
