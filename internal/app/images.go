@@ -444,14 +444,15 @@ func naturalLess(a, b string) bool {
 	for i < len(a) && j < len(b) {
 		ca, cb := a[i], b[j]
 		if isDigit(ca) && isDigit(cb) {
+			si, sj := i, j
 			for i < len(a) && isDigit(a[i]) {
 				i++
 			}
 			for j < len(b) && isDigit(b[j]) {
 				j++
 			}
-			na, _ := strconv.Atoi(a[:i])
-			nb, _ := strconv.Atoi(b[:j])
+			na, _ := strconv.Atoi(a[si:i])
+			nb, _ := strconv.Atoi(b[sj:j])
 			if na != nb {
 				return na < nb
 			}
