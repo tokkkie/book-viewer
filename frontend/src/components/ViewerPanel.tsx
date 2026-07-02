@@ -75,7 +75,10 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault()
       setCurrentIndex(prev => {
-        const next = Math.min(images.length - 1, prev + 1)
+        const current = images[prev]
+        const isLandscape = current && current.width > 0 && current.height > 0 && current.width > current.height
+        const step = isLandscape ? 1 : 2
+        const next = Math.min(images.length - 1, prev + step)
         if (next !== prev && volume) {
           loadImageData(volume, next)
         }
@@ -85,7 +88,10 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     } else if (e.key === 'ArrowRight') {
       e.preventDefault()
       setCurrentIndex(prev => {
-        const next = Math.max(0, prev - 1)
+        const current = images[prev]
+        const isLandscape = current && current.width > 0 && current.height > 0 && current.width > current.height
+        const step = isLandscape ? 1 : 2
+        const next = Math.max(0, prev - step)
         if (next !== prev && volume) {
           loadImageData(volume, next)
         }
@@ -95,7 +101,7 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       setCurrentIndex(prev => {
-        const next = Math.min(images.length - 1, prev + 2)
+        const next = Math.min(images.length - 1, prev + 1)
         if (next !== prev && volume) {
           loadImageData(volume, next)
         }
@@ -105,7 +111,7 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setCurrentIndex(prev => {
-        const next = Math.max(0, prev - 2)
+        const next = Math.max(0, prev - 1)
         if (next !== prev && volume) {
           loadImageData(volume, next)
         }
@@ -113,7 +119,7 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
       })
       setTranslate({ x: 0, y: 0 })
     }
-  }, [volume, images.length, onClose])
+  }, [volume, images, onClose])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -170,7 +176,9 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     >
       <div className="viewer-header">
         <div className="viewer-info">
-          {volume.name} - Page {currentIndex + 1} / {images.length}
+          {volume.name} - {isLandscape || !nextImage
+            ? `Page ${currentIndex + 1} / ${images.length}`
+            : `Page ${currentIndex + 1}-${currentIndex + 2} / ${images.length}`}
         </div>
         <button onClick={onClose} className="btn-close">Close (Esc)</button>
       </div>
