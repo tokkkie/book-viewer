@@ -458,6 +458,12 @@ func naturalLess(a, b string) bool {
 			}
 		} else {
 			if ca != cb {
+				if ca == ' ' {
+					return false
+				}
+				if cb == ' ' {
+					return true
+				}
 				return ca < cb
 			}
 			i++
