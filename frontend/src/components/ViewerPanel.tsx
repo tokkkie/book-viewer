@@ -75,6 +75,26 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault()
       setCurrentIndex(prev => {
+        const next = Math.min(images.length - 1, prev + 1)
+        if (next !== prev && volume) {
+          loadImageData(volume, next)
+        }
+        return next
+      })
+      setTranslate({ x: 0, y: 0 })
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setCurrentIndex(prev => {
+        const next = Math.max(0, prev - 1)
+        if (next !== prev && volume) {
+          loadImageData(volume, next)
+        }
+        return next
+      })
+      setTranslate({ x: 0, y: 0 })
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCurrentIndex(prev => {
         const current = images[prev]
         const isLandscape = current && current.width > 0 && current.height > 0 && current.width > current.height
         const step = isLandscape ? 1 : 2
@@ -85,33 +105,13 @@ export default function ViewerPanel({ volume, onClose }: ViewerPanelProps) {
         return next
       })
       setTranslate({ x: 0, y: 0 })
-    } else if (e.key === 'ArrowRight') {
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setCurrentIndex(prev => {
         const current = images[prev]
         const isLandscape = current && current.width > 0 && current.height > 0 && current.width > current.height
         const step = isLandscape ? 1 : 2
         const next = Math.max(0, prev - step)
-        if (next !== prev && volume) {
-          loadImageData(volume, next)
-        }
-        return next
-      })
-      setTranslate({ x: 0, y: 0 })
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setCurrentIndex(prev => {
-        const next = Math.min(images.length - 1, prev + 1)
-        if (next !== prev && volume) {
-          loadImageData(volume, next)
-        }
-        return next
-      })
-      setTranslate({ x: 0, y: 0 })
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setCurrentIndex(prev => {
-        const next = Math.max(0, prev - 1)
         if (next !== prev && volume) {
           loadImageData(volume, next)
         }
